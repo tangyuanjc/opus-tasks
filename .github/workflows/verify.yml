@@ -1,0 +1,52 @@
+name: AutoLoop Verification
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # Every 2 hours
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get pending-verify issues
+        id: issues
+        run: |
+          gh issue list --label "pending-verify" --json number,title,body --jq '.[] | @json' > issues.jsonl
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify each issue
+        run: |
+          while IFS= read -r issue; do
+            number=$(echo "$issue" | jq -r '.number')
+            body=$(echo "$issue" | jq -r '.body')
+
+            # Extract verify block
+            verify_cmd=$(echo "$body" | sed -n '/```bash/,/```/p' | sed '1d;$d')
+
+            if [ -n "$verify_cmd" ]; then
+              echo "Verifying issue #$number"
+              if eval "$verify_cmd"; then
+                gh issue edit "$number" --remove-label "pending-verify" --add-label "verified"
+                gh issue close "$number"
+                gh issue comment "$number" --body "✅ Verification passed"
+              else
+                retry_count=$(gh issue view "$number" --json labels --jq '.labels[] | select(.name | startswith("retry:")) | .name' | cut -d: -f2)
+                retry_count=${retry_count:-0}
+                retry_count=$((retry_count + 1))
+
+                if [ $retry_count -ge 3 ]; then
+                  gh issue edit "$number" --remove-label "pending-verify" --add-label "needs-decision"
+                  gh issue comment "$number" --body "❌ Verification failed after 3 retries. Human decision needed."
+                else
+                  gh issue edit "$number" --add-label "retry:$retry_count"
+                  gh issue comment "$number" --body "⚠️ Verification failed. Retry $retry_count/3"
+                fi
+              fi
+            fi
+          done < issues.jsonl
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
