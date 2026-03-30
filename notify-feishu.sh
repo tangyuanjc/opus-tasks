@@ -2,6 +2,9 @@
 # AutoLoop飞书通知脚本
 # 每1小时检查GitHub Issues状态变化并通知jc
 
+# 设置PATH确保能找到命令
+export PATH="/opt/homebrew/bin:$PATH"
+
 REPO="tangyuanjc/opus-tasks"
 LAST_CHECK_FILE="$HOME/opus-tasks/.last-check"
 
